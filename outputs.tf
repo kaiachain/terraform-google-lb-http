@@ -35,20 +35,20 @@ output "ipv6_enabled" {
   value       = var.enable_ipv6
 }
 
-output "http_proxy" {
-  description = "The HTTP proxy used by this module."
-  value       = google_compute_target_http_proxy.default[*].self_link
-}
+# output "http_proxy" {
+#   description = "The HTTP proxy used by this module."
+#   value       = google_compute_target_http_proxy.default[*].self_link
+# }
 
-output "https_proxy" {
-  description = "The HTTPS proxy used by this module."
-  value       = google_compute_target_https_proxy.default[*].self_link
-}
+# output "https_proxy" {
+#   description = "The HTTPS proxy used by this module."
+#   value       = google_compute_target_https_proxy.default[*].self_link
+# }
 
-output "url_map" {
-  description = "The default URL map used by this module."
-  value       = google_compute_url_map.default[*].self_link
-}
+# output "url_map" {
+#   description = "The default URL map used by this module."
+#   value       = google_compute_url_map.default[*].self_link
+# }
 
 output "ssl_certificate_created" {
   description = "The SSL certificate create from key/pem"

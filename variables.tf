@@ -221,6 +221,11 @@ variable "ssl_certificates" {
   default     = []
 }
 
+variable "certificate_manager_certificates" {
+  type    = list(string)
+  default = []
+}
+
 variable "private_key" {
   description = "Content of the private SSL key. Requires `ssl` to be set to `true` and `create_ssl_certificate` set to `true`"
   type        = string
@@ -307,20 +312,19 @@ variable "server_tls_policy" {
 
 variable "http_port" {
   description = "The port for the HTTP load balancer"
-  type        = number
-  default     = 80
-  validation {
-    condition     = var.http_port >= 1 && var.http_port <= 65535
-    error_message = "You must specify exactly one port between 1 and 65535"
-  }
+  type        = list(string)
+  default     = [80]
+
 }
 
 variable "https_port" {
   description = "The port for the HTTPS load balancer"
-  type        = number
-  default     = 443
-  validation {
-    condition     = var.https_port >= 1 && var.https_port <= 65535
-    error_message = "You must specify exactly one port between 1 and 65535"
-  }
+  type        = list(string)
+  default     = [443]
+}
+
+
+variable "domain" {
+  description = "domain use for lb"
+  type = string
 }

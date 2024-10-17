@@ -19,24 +19,25 @@ locals {
   address      = var.create_address ? join("", google_compute_global_address.default[*].address) : var.address
   ipv6_address = var.create_ipv6_address ? join("", google_compute_global_address.default_ipv6[*].address) : var.ipv6_address
 
-  url_map             = var.create_url_map ? join("", google_compute_url_map.default[*].self_link) : var.url_map
+  # url_map             = var.create_url_map ? join("", google_compute_url_map.default[*].self_link) : var.url_map
   create_http_forward = var.http_forward || var.https_redirect
 
   health_checked_backends = { for backend_index, backend_value in var.backends : backend_index => backend_value if backend_value["health_check"] != null }
 
   is_internal      = var.load_balancing_scheme == "INTERNAL_SELF_MANAGED"
   internal_network = local.is_internal ? var.network : null
+  port_map         = zipmap(var.http_port, var.https_port)
 }
 
 ### IPv4 block ###
 resource "google_compute_global_forwarding_rule" "http" {
   provider              = google-beta
   project               = var.project
-  count                 = local.create_http_forward ? 1 : 0
-  name                  = var.name
-  target                = google_compute_target_http_proxy.default[0].self_link
+  for_each              = local.create_http_forward ? toset(var.http_port) : []
+  name                  = "${var.name}-${each.value}"
+  target                = google_compute_target_http_proxy.default[local.port_map[each.value]].self_link
   ip_address            = local.address
-  port_range            = var.http_port
+  port_range            = each.value
   labels                = var.labels
   load_balancing_scheme = var.load_balancing_scheme
   network               = local.internal_network
@@ -45,11 +46,11 @@ resource "google_compute_global_forwarding_rule" "http" {
 resource "google_compute_global_forwarding_rule" "https" {
   provider              = google-beta
   project               = var.project
-  count                 = var.ssl ? 1 : 0
-  name                  = "${var.name}-https"
-  target                = google_compute_target_https_proxy.default[0].self_link
+  for_each              = local.create_http_forward ? toset(var.https_port) : []
+  name                  = "${var.name}-https-${each.value}"
+  target                = google_compute_target_https_proxy.default[each.key].self_link
   ip_address            = local.address
-  port_range            = var.https_port
+  port_range            = each.value
   labels                = var.labels
   load_balancing_scheme = var.load_balancing_scheme
   network               = local.internal_network
@@ -79,18 +80,18 @@ resource "google_compute_global_forwarding_rule" "http_ipv6" {
   network               = local.internal_network
 }
 
-resource "google_compute_global_forwarding_rule" "https_ipv6" {
-  provider              = google-beta
-  project               = var.project
-  count                 = var.enable_ipv6 && var.ssl ? 1 : 0
-  name                  = "${var.name}-ipv6-https"
-  target                = google_compute_target_https_proxy.default[0].self_link
-  ip_address            = local.ipv6_address
-  port_range            = "443"
-  labels                = var.labels
-  load_balancing_scheme = var.load_balancing_scheme
-  network               = local.internal_network
-}
+# resource "google_compute_global_forwarding_rule" "https_ipv6" {
+#   provider              = google-beta
+#   project               = var.project
+#   count                 = var.enable_ipv6 && var.ssl ? 1 : 0
+#   name                  = "${var.name}-ipv6-https"
+#   target                = google_compute_target_https_proxy.default[0].self_link
+#   ip_address            = local.ipv6_address
+#   port_range            = "443"
+#   labels                = var.labels
+#   load_balancing_scheme = var.load_balancing_scheme
+#   network               = local.internal_network
+# }
 
 resource "google_compute_global_address" "default_ipv6" {
   provider   = google-beta
@@ -103,23 +104,29 @@ resource "google_compute_global_address" "default_ipv6" {
 ### IPv6 block ###
 
 # HTTP proxy when http forwarding is true
+# resource "google_compute_target_http_proxy" "default" {
+#   project = var.project
+#   count   = local.create_http_forward ? 1 : 0
+#   name    = "${var.name}-http-proxy"
+#   url_map = var.https_redirect == false ? local.url_map : join("", google_compute_url_map.https_redirect[*].self_link)
+# }
+
 resource "google_compute_target_http_proxy" "default" {
-  project = var.project
-  count   = local.create_http_forward ? 1 : 0
-  name    = "${var.name}-http-proxy"
-  url_map = var.https_redirect == false ? local.url_map : join("", google_compute_url_map.https_redirect[*].self_link)
+  provider = google-beta
+  project  = var.project
+  for_each = { for idx, backend in var.backends : idx => backend } # Iterating over the 3 backends
+  name     = "${var.name}-http-proxy-${each.key}"
+  url_map  = google_compute_url_map.https_redirect[each.key].self_link
 }
 
 # HTTPS proxy when ssl is true
 resource "google_compute_target_https_proxy" "default" {
-  project = var.project
-  count   = var.ssl ? 1 : 0
-  name    = "${var.name}-https-proxy"
-  url_map = local.url_map
-
-  ssl_certificates  = compact(concat(var.ssl_certificates, google_compute_ssl_certificate.default[*].self_link, google_compute_managed_ssl_certificate.default[*].self_link, ), )
+  project           = var.project
+  for_each          = { for idx, backend in var.backends : idx => backend } # Iterating over the 3 backends
+  name              = "${var.name}-https-proxy-${each.key}"
+  url_map           = google_compute_url_map.default[each.key].self_link
   certificate_map   = var.certificate_map != null ? "//certificatemanager.googleapis.com/${var.certificate_map}" : null
-  ssl_policy        = var.ssl_policy
+  ssl_policy        = "global-compatible"
   quic_override     = var.quic == null ? "NONE" : var.quic ? "ENABLE" : "DISABLE"
   server_tls_policy = var.server_tls_policy
 }
@@ -164,16 +171,17 @@ resource "google_compute_managed_ssl_certificate" "default" {
 resource "google_compute_url_map" "default" {
   provider        = google-beta
   project         = var.project
-  count           = var.create_url_map ? 1 : 0
-  name            = "${var.name}-url-map"
-  default_service = google_compute_backend_service.default[keys(var.backends)[0]].self_link
+  for_each        = { for idx, backend in var.backends : idx => backend } # Iterating over the 3 backends
+  name            = "${var.name}-url-map-${each.key}"
+  default_service = google_compute_backend_service.default[each.key].self_link
 }
 
 resource "google_compute_url_map" "https_redirect" {
-  project = var.project
-  count   = var.https_redirect ? 1 : 0
-  name    = "${var.name}-https-redirect"
+  project  = var.project
+  for_each = { for idx, backend in var.backends : idx => backend } # Iterating over the 3 backends
+  name     = "${var.name}-https-redirect-${each.key}"
   default_url_redirect {
+    host_redirect          = format("%s:%s",var.domain,each.key)
     https_redirect         = true
     redirect_response_code = "MOVED_PERMANENTLY_DEFAULT"
     strip_query            = false
